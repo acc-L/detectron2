@@ -15,6 +15,7 @@ def add_pointrend_config(cfg):
     cfg.INPUT.COLOR_AUG_SSD = False
 
     # Names of the input feature maps to be used by a coarse mask head.
+    cfg.MODEL.META_ARCHITECTURE = "MaksGuildRCNN"
     cfg.MODEL.ROI_MASK_HEAD.IN_FEATURES = ("p2",)
     cfg.MODEL.ROI_MASK_HEAD.FC_DIM = 1024
     cfg.MODEL.ROI_MASK_HEAD.NUM_FC = 2

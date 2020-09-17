@@ -45,6 +45,7 @@ class YTVOSDataset(CustomDataset):
           for frame_id in range(len(vid_info['filenames'])):
             img_ids.append((idx, frame_id))
         self.img_ids = img_ids
+
         if proposal_file is not None:
             self.proposals = self.load_proposals(proposal_file)
         else:
@@ -172,7 +173,7 @@ class YTVOSDataset(CustomDataset):
         # sample another frame in the same sequence as reference
         vid, frame_id = idx
         vid_info = self.vid_infos[vid]
-        sample_range = (len(vid_info['filenames'])
+        sample_range = len(vid_info['filenames'])
         rc=random.random()
         if rc<0.5:
             frame_id+=1
@@ -195,6 +196,14 @@ class YTVOSDataset(CustomDataset):
         basename = osp.basename(vid_info['filenames'][frame_id])
         ref_frame_id = self.sample_ref(idx)
 
+        if ref_frame_id:
+            ref_ann = self.get_ann_info(vid, ref_frame_id[1])
+            masks = ref_ann['masks']
+        else:
+            masks=None
+        if not masks:
+            masks = [np.zeros(img.shape[:2], dtype=np.float32)]
+
         # load proposals if necessary
         if self.proposals is not None:
             proposals = self.proposals[idx][:self.num_max_proposals]
@@ -214,8 +223,8 @@ class YTVOSDataset(CustomDataset):
                 scores = None
 
         ann = self.get_ann_info(vid, frame_id)
-        gt_bboxes = [(x, y, w+w, y+h) for (x, y, w, h) in ann['bboxes']]
         gt_labels = ann['labels']
+        gt_bboxes = ann['bboxes']
         # obj ids attribute does not exist in current annotation
         # need to add it
         gt_ids = ann['obj_ids']
@@ -254,12 +263,10 @@ class YTVOSDataset(CustomDataset):
             gt_masks = self.mask_transform(ann['masks'], pad_shape,
                                            scale_factor, flip)
 
-        if not ref_frame_id is None:
-            ref_ann = self.get_ann_info(vid, ref_frame_id)
-            ref_masks = self.mask_transform(ref_ann['masks'], pad_shape,
+            masks = self.mask_transform(masks, pad_shape,
                                            scale_factor, flip)
-            mask=np.sum(ref_masks).astype(np.float32)
 
+        mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0).astype(np.float32)
         ori_shape = (vid_info['height'], vid_info['width'], 3)
         img_meta = dict(
             ori_shape=ori_shape,
@@ -270,21 +277,26 @@ class YTVOSDataset(CustomDataset):
 
         data = dict(
             image=to_tensor(img),
-            img_meta=img_meta,
+            #img_meta=img_meta,
+            height=img_shape[0],
+            width=img_shape[1], 
+            img_shape=img_shape, 
         )
-        Instance={'gt_boxes':to_tensor(gt_bboxes)}
-        if self.proposals is not None:
-            data['proposals'] = to_tensor(proposals)
-        if self.with_label:
-            Instance['gt_classes'] = to_tensor(gt_labels)
-        if self.with_track:
-            data['gt_pids'] = to_tensor(gt_pids)
+        ann = []
+        for i, bbox in enumerate(gt_bboxes):
+            instance = {'bbox':bbox}
+            if self.proposals is not None:
+                instance['proposals'] = to_tensor(proposals)
+            if self.with_label:
+                instance['category_id']=gt_labels[i]
+            if self.with_mask:
+                instance['segmentation']=gt_masks[i]
+            ann.append(instance)
+
         if self.with_crowd:
             data['gt_bboxes_ignore'] = to_tensor(gt_bboxes_ignore)
-        if self.with_mask:
-            Instance['gt_masks'] = gt_masks
-            data['mask'] = mask
-        data['instances']=Instance
+        data['mask'] = mask
+        data['annotations'] = ann
         return data
 
     def prepare_test_img(self, idx):
@@ -300,11 +312,13 @@ class YTVOSDataset(CustomDataset):
 
         if ref_frame_id:
             ref_ann = self.get_ann_info(vid, ref_frame_id)
-            ref_masks = self.mask_transform(ref_ann['masks'], pad_shape,
-                                           scale_factor, flip)
-            mask=np.sum(ref_masks).astype(np.float32)
+            masks = ref_ann['masks']
+        else:
+            masks=None
+        if not masks:
+            masks = [np.zeros(img.shape[:2], dtype=np.float32)]
 
-        def prepare_single(img, frame_id, scale, flip, proposal=None):
+        def prepare_single(img, frame_id, scale, flip, masks, proposal=None):
             _img, img_shape, pad_shape, scale_factor = self.img_transform(
                 img, scale, flip, keep_ratio=self.resize_keep_ratio)
             _img = to_tensor(_img)
@@ -317,6 +331,8 @@ class YTVOSDataset(CustomDataset):
                 frame_id =frame_id,
                 scale_factor=scale_factor,
                 flip=flip)
+            _mask = self.mask_transform(masks, pad_shape,
+                                           scale_factor, flip)
             if proposal is not None:
                 if proposal.shape[1] == 5:
                     score = proposal[:, 4, None]
@@ -330,24 +346,12 @@ class YTVOSDataset(CustomDataset):
                 _proposal = to_tensor(_proposal)
             else:
                 _proposal = None
-            return _img, _img_meta, _proposal
+            return _img, _img_meta, _proposal, _mask
 
-        imgs = []
-        img_metas = []
-        proposals = []
-        for scale in self.img_scales:
-            _img, _img_meta, _proposal = prepare_single(
-                img, frame_id, scale, False, proposal)
-            imgs.append(_img)
-            img_metas.append(_img_meta)
-            proposals.append(_proposal)
-            if self.flip_ratio > 0:
-                _img, _img_meta, _proposal = prepare_single(
-                    img, scale, True, proposal)
-                imgs.append(_img)
-                img_metas.append(_img_meta)
-                proposals.append(_proposal)
-        data = dict(img=imgs, img_meta=img_metas, mask=mask)
+        img, img_meta, proposal, masks = prepare_single(
+                img, frame_id, self.img_scales[0], False, masks, proposal)
+        mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0)
+        data = dict(image=img, img_meta=img_meta, mask=mask)
         return data
 
     def _parse_ann_info(self, ann_info, frame_id, with_mask=True):

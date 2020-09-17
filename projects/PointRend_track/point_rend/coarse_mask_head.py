@@ -38,7 +38,7 @@ class CoarseMaskHead(nn.Module):
         # fmt: on
 
         self.conv_layers = []
-        if self.input_channels > conv_dim:
+        if self.input_channels > conv_dim+1:
             self.reduce_channel_dim_conv = Conv2d(
                 self.input_channels,
                 conv_dim,
@@ -51,7 +51,7 @@ class CoarseMaskHead(nn.Module):
             self.conv_layers.append(self.reduce_channel_dim_conv)
 
         self.reduce_spatial_dim_conv = Conv2d(
-            conv_dim, conv_dim, kernel_size=2, stride=2, padding=0, bias=True, activation=F.relu
+            self.input_channels, conv_dim, kernel_size=2, stride=2, padding=0, bias=True, activation=F.relu
         )
         self.conv_layers.append(self.reduce_spatial_dim_conv)
 

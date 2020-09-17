@@ -2,7 +2,27 @@ import mmcv
 import numpy as np
 from numpy import random
 
-from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
+def calc_iou(box1, box2):
+    def area(box):
+        if box[0]>=box[2] or box[1]>=box[3]:
+            return 0
+        return (box[2]-box[0])*(box[3]-box[1])
+    area1 = area(box1)
+    area2 = area(box2)
+    iterbox = np.zeros_like(box1)
+    iterbox[:2] = np.maximum(box1[:2], box2[:2])
+    iterbox[2:] = np.np.minimum(box1[2:], box2[2:])
+    areaa = area(iterbox)
+    return areaa/(area1+area2-areaa)
+
+
+def bbox_overlaps(boxes1, boxes2):
+    res = np.zeros((len(boxe1), len(boxes2)), dtype=np.float32)
+    for i, box1 in enumerate(boxes1):
+        for j, box2 in enumerate(boxes2):
+            res[i, j] = calc_iou(box1, box2)
+    return res
+
 
 
 class PhotoMetricDistortion(object):

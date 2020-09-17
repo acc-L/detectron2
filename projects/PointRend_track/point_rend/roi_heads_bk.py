@@ -9,16 +9,11 @@ from typing import Dict, List, Optional, Tuple, Union
 from detectron2.structures import Boxes, ImageList, Instances, pairwise_iou
 from detectron2.modeling import ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads.mask_head import (
-    build_mask_head, 
+    build_mask_head,
     mask_rcnn_inference,
     mask_rcnn_loss,
 )
-from detectron2.modeling.poolers import ROIPooler
-from detectron2.modeling.roi_heads.roi_heads import(
-        select_foreground_proposals, 
-        build_box_head, 
-        FastRCNNOutputLayers, 
-)
+from detectron2.modeling.roi_heads.roi_heads import select_foreground_proposals
 
 from .point_features import (
     generate_regular_grid_point_coords,
@@ -68,9 +63,9 @@ class PointRendROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         # TODO use explicit args style
         super().__init__(cfg, input_shape)
+        self._init_box_head(cfg, input_shape)
         self._init_mask_head(cfg, input_shape)
-    
-    @classmethod
+
     def _init_box_head(self, cfg, input_shape):
         # fmt: off
         in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
@@ -106,7 +101,7 @@ class PointRendROIHeads(StandardROIHeads):
             "box_head": box_head,
             "box_predictor": box_predictor,
         }
-    
+
     def _init_mask_head(self, cfg, input_shape):
         # fmt: off
         self.mask_on                 = cfg.MODEL.MASK_ON
@@ -143,7 +138,7 @@ class PointRendROIHeads(StandardROIHeads):
         self.mask_point_subdivision_num_points  = cfg.MODEL.POINT_HEAD.SUBDIVISION_NUM_POINTS
         # fmt: on
 
-        in_channels = np.sum([input_shape[f].channels+1 for f in self.mask_point_in_features])
+        in_channels = np.sum([input_shape[f].channels for f in self.mask_point_in_features])
         self.mask_point_head = build_point_head(
             cfg, ShapeSpec(channels=in_channels, width=1, height=1)
         )
@@ -168,7 +163,7 @@ class PointRendROIHeads(StandardROIHeads):
         features: Dict[str, torch.Tensor],
         proposals: List[Instances],
         targets: Optional[List[Instances]] = None,
-        mask = None,
+        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[List[Instances], Dict[str, torch.Tensor]]:
         """
         See :class:`ROIHeads.forward`.
@@ -180,6 +175,7 @@ class PointRendROIHeads(StandardROIHeads):
         del targets
         if not mask:
             mask = np.zeros((10, 10), dtype=np.float32)
+
         add_premask_on_features(features, mask)
 
         if self.training:
@@ -320,15 +316,9 @@ class PointRendROIHeads(StandardROIHeads):
                 )
             return mask_logits
 
-def add_premask_on_features(features, rmask):
+def add_premask_on_features(features, mask):
     for key, value in features.items():
-        r, c, h, w = value.shape
-        rrmasks = []
-        for i in range(r):
-            cmask = rmask[i]
-            mask = torch.from_numpy(cv2.resize(cmask[0], (w, h)))
-            mask = torch.unsqueeze(mask, 0)
-            mask = torch.unsqueeze(mask, 0).cuda()
-            rrmasks.append(mask)
-        rrmask = torch.cat(rrmasks, 0)
-        features[key] = torch.cat([value, rrmask], 1)
+        r, c, h, w = value.shape()
+        print(r, c, h, w)
+        mask = torch.from_numpy(cv2.resize(mask, (h, w))).repeat(r, 1, h, w)
+        features[key] = torch.cat([value, mask], 1)

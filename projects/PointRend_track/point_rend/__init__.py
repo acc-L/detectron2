@@ -5,3 +5,4 @@ from .coarse_mask_head import CoarseMaskHead
 from .roi_heads import PointRendROIHeads
 from .semantic_seg import PointRendSemSegHead
 from .color_augmentation import ColorAugSSDTransform
+from .datasets import YTVOSDataset
