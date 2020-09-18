@@ -44,21 +44,23 @@ class MaskGuildRCNN(GeneralizedRCNN):
         if not self.training:
             return self.inference(batched_inputs)
 
-        images = self.preprocess_image(batched_inputs)
+        images, ref_images = self.preprocess_image(batched_inputs)
         mask = [binput['mask'] for binput in batched_inputs]
         if "instances" in batched_inputs[0]:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
         else:
             gt_instances = None
 
-        features = self.backbone(images.tensor)
+        with torch.no_grad():
+            features = self.backbone(images.tensor)
+            ref_features = self.backbone(ref_images.tensor)
+            ref_features = [ref_features[f] for f in self.box_in_features]
 
-        if self.proposal_generator:
-            proposals, proposal_losses = self.proposal_generator(images, features, gt_instances)
-        else:
-            assert "proposals" in batched_inputs[0]
-            proposals = [x["proposals"].to(self.device) for x in batched_inputs]
-            proposal_losses = {}
+            if self.proposal_generator:
+                proposals, _ = self.proposal_generator(images, features, gt_instances)
+            else:
+                assert "proposals" in batched_inputs[0]
+                proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
         _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, mask)
         if self.vis_period > 0:
@@ -68,7 +70,6 @@ class MaskGuildRCNN(GeneralizedRCNN):
 
         losses = {}
         losses.update(detector_losses)
-        losses.update(proposal_losses)
         return losses
 
     def inference(self, batched_inputs, detected_instances=None, do_postprocess=True):
@@ -92,6 +93,8 @@ class MaskGuildRCNN(GeneralizedRCNN):
 
         images = self.preprocess_image(batched_inputs)
         masks = [binput['mask'] for binput in batched_inputs]
+        if batched_inputs[0]['frame_id']==0:
+            ref_features = None
         features = self.backbone(images.tensor)
 
         if detected_instances is None:
@@ -106,6 +109,8 @@ class MaskGuildRCNN(GeneralizedRCNN):
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
+        ref_features = [features[f] for f in self.box_in_features]
+
         if do_postprocess:
             return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
         else:
@@ -117,4 +122,6 @@ class MaskGuildRCNN(GeneralizedRCNN):
         """
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = ImageList.from_tensors(images, self.backbone.size_divisibility)
-        return images
+        ref_images = [x["ref_image"].to(self.device) for x in batched_inputs]
+        ref_images = ImageList.from_tensors(ref_images, self.backbone.size_divisibility)
+        return images, ref_images

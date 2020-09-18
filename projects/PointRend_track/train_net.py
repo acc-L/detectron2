@@ -25,6 +25,7 @@ from detectron2.data.detection_utils import (
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 import detectron2.utils.comm as comm
+from detectron2.modeling import build_model
 from detectron2.data import DatasetMapper, MetadataCatalog, build_batch_data_loader, MapDataset
 from detectron2.data.samplers import InferenceSampler, RepeatFactorTrainingSampler, TrainingSampler
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
@@ -39,7 +40,10 @@ from point_rend import (
 
 
 def train_mapper(datas):
-    [ann.update({'bbox_mode':BoxMode.XYXY_ABS}) for ann in datas["annotations"]]
+    label_map = {1:0, 8:16, 14:15}
+    for ann in datas["annotations"]:
+        ann.update({'bbox_mode':BoxMode.XYXY_ABS})
+        ann['category_id'] = label_map.get(ann['category_id'], -1)
     instances = annotations_to_instances(
             datas["annotations"], datas["img_shape"], mask_format='bitmask')
     datas.pop('annotations')
@@ -118,6 +122,21 @@ class Trainer(DefaultTrainer):
     are working on a new research project. In that case you can use the cleaner
     "SimpleTrainer", or write your own training loop.
     """
+
+    @classmethod
+    def build_model(cls, cfg):
+        """
+        Returns:
+            torch.nn.Module:
+        """
+        model = build_model(cfg)
+        logger = logging.getLogger(__name__)
+        logger.info("Model:\n{}".format(model))
+        for param in model.parameters():
+            param.requires_grad = False
+        for param in model.roi_heads.box_merger.parameters():
+            param.requires_grad = True
+        return model
 
     @classmethod
     def build_evaluator(cls, cfg, dataset_name, output_folder='./output'):

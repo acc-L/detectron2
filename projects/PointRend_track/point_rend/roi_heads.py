@@ -17,8 +17,8 @@ from detectron2.modeling.poolers import ROIPooler
 from detectron2.modeling.roi_heads.roi_heads import(
         select_foreground_proposals, 
         build_box_head, 
-        FastRCNNOutputLayers, 
 )
+from .fast_rcnn import SPFastRCNNOutputLayers
 
 from .point_features import (
     generate_regular_grid_point_coords,
@@ -28,6 +28,7 @@ from .point_features import (
     point_sample_fine_grained_features,
 )
 from .point_head import build_point_head, roi_mask_point_loss
+from .features_merge import BoxFeatureMerger
 
 
 def calculate_uncertainty(logits, classes):
@@ -68,6 +69,7 @@ class PointRendROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         # TODO use explicit args style
         super().__init__(cfg, input_shape)
+        self.choosed_classes = cfg.train.train_classes
         self._init_mask_head(cfg, input_shape)
     
     @classmethod
@@ -82,7 +84,7 @@ class PointRendROIHeads(StandardROIHeads):
 
         # If StandardROIHeads is applied on multiple feature maps (as in FPN),
         # then we share the same predictors and therefore the channel counts must be the same
-        in_channels = [input_shape[f].channels+1 for f in in_features]
+        in_channels = [input_shape[f].channels for f in in_features]
         # Check all channel counts are equal
         assert len(set(in_channels)) == 1, in_channels
         in_channels = in_channels[0]
@@ -99,12 +101,14 @@ class PointRendROIHeads(StandardROIHeads):
         box_head = build_box_head(
             cfg, ShapeSpec(channels=in_channels, height=pooler_resolution, width=pooler_resolution)
         )
-        box_predictor = FastRCNNOutputLayers(cfg, box_head.output_shape)
+        box_merger = BoxFeatureMerger(cfg, in_channels)
+        box_predictor = SPFastRCNNOutputLayers(cfg, box_head.output_shape, ce_weight=cfg.train.CE_WEIGHT)
         return {
             "box_in_features": in_features,
             "box_pooler": box_pooler,
             "box_head": box_head,
             "box_predictor": box_predictor,
+            "box_merger": box_merger, 
         }
     
     def _init_mask_head(self, cfg, input_shape):
@@ -166,6 +170,7 @@ class PointRendROIHeads(StandardROIHeads):
         self,
         images: ImageList,
         features: Dict[str, torch.Tensor],
+        ref_features: Dict[str, torch.Tensor],
         proposals: List[Instances],
         targets: Optional[List[Instances]] = None,
         mask = None,
@@ -183,7 +188,7 @@ class PointRendROIHeads(StandardROIHeads):
         add_premask_on_features(features, mask)
 
         if self.training:
-            losses = self._forward_box(features, proposals)
+            losses = self._forward_box(features, ref_features, proposals)
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head.
@@ -191,11 +196,57 @@ class PointRendROIHeads(StandardROIHeads):
             losses.update(self._forward_keypoint(features, proposals))
             return proposals, losses
         else:
-            pred_instances = self._forward_box(features, proposals)
+            pred_instances = self._forward_box(features, ref_features, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(features, pred_instances)
             return pred_instances, {}
+
+    def _forward_box(
+        self, features: Dict[str, torch.Tensor], ref_features: Dict[str, torch.Tensor], proposals: List[Instances]
+    ) -> Union[Dict[str, torch.Tensor], List[Instances]]:
+        """
+        Forward logic of the box prediction branch. If `self.train_on_pred_boxes is True`,
+            the function puts predicted boxes in the `proposal_boxes` field of `proposals` argument.
+
+        Args:
+            features (dict[str, Tensor]): mapping from feature map names to tensor.
+                Same as in :meth:`ROIHeads.forward`.
+            proposals (list[Instances]): the per-image object proposals with
+                their matching ground truth.
+                Each has fields "proposal_boxes", and "objectness_logits",
+                "gt_classes", "gt_boxes".
+
+        Returns:
+            In training, a dict of losses.
+            In inference, a list of `Instances`, the predicted instances.
+        """
+        features = [features[f] for f in self.box_in_features]
+        if ref_features is None:
+            box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+        else:
+            box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+            ref_box_features = self.box_pooler(ref_features, [x.proposal_boxes for x in proposals])
+            box_features = self.box_merger(box_features, ref_box_features)
+
+        box_features = self.box_head(box_features)
+        predictions = self.box_predictor(box_features)
+        del box_features
+
+        if self.training:
+            losses = self.box_predictor.losses(predictions, proposals)
+            # proposals is modified in-place below, so losses must be computed first.
+            if self.train_on_pred_boxes:
+                with torch.no_grad():
+                    pred_boxes = self.box_predictor.predict_boxes_for_gt_classes(
+                        predictions, proposals
+                    )
+                    for proposals_per_image, pred_boxes_per_image in zip(proposals, pred_boxes):
+                        proposals_per_image.proposal_boxes = Boxes(pred_boxes_per_image)
+            return losses
+        else:
+            pred_instances, _ = self.box_predictor.inference(predictions, proposals)
+            return pred_instances
 
     def _forward_mask(self, features, instances):
         """
@@ -215,7 +266,7 @@ class PointRendROIHeads(StandardROIHeads):
             return {} if self.training else instances
 
         if self.training:
-            proposals, _ = select_foreground_proposals(instances, self.num_classes)
+            proposals, _ = select_proposals_of_classes(instances, self.choosed_classes)
             proposal_boxes = [x.proposal_boxes for x in proposals]
             mask_coarse_logits = self._forward_mask_coarse(features, proposal_boxes)
 
@@ -332,3 +383,35 @@ def add_premask_on_features(features, rmask):
             rrmasks.append(mask)
         rrmask = torch.cat(rrmasks, 0)
         features[key] = torch.cat([value, rrmask], 1)
+
+
+def select_proposals_of_classes(
+    proposals: List[Instances], choosed_class: List[int]
+) -> Tuple[List[Instances], List[torch.Tensor]]:
+    """
+    Given a list of N Instances (for N images), each containing a `gt_classes` field,
+    return a list of Instances that contain only instances with `gt_classes != -1 &&
+    gt_classes != bg_label`.
+
+    Args:
+        proposals (list[Instances]): A list of N Instances, where N is the number of
+            images in the batch.
+        bg_label: label index of background class.
+
+    Returns:
+        list[Instances]: N Instances, each contains only the selected foreground instances.
+        list[Tensor]: N boolean vector, correspond to the selection mask of
+            each Instances object. True for selected instances.
+    """
+    assert isinstance(proposals, (list, tuple))
+    assert isinstance(proposals[0], Instances)
+    assert proposals[0].has("gt_classes")
+    fg_proposals = []
+    fg_selection_masks = []
+    for proposals_per_image in proposals:
+        gt_classes = proposals_per_image.gt_classes
+        fg_selection_mask = (gt_classes != -1) & (gt_classes in choosed_class)
+        fg_idxs = fg_selection_mask.nonzero().squeeze(1)
+        fg_proposals.append(proposals_per_image[fg_idxs])
+        fg_selection_masks.append(fg_selection_mask)
+    return fg_proposals, fg_selection_masks

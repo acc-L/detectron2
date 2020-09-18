@@ -179,13 +179,11 @@ class YTVOSDataset(CustomDataset):
             frame_id+=1
         else:
             frame_id-=1
-        if frame_id<0 or frame_id>=sample_range:
-            return None
-        rd=random.random()
-        if rd<0.5:
-            return (vid, frame_id)
-        else:
-            return None
+        if frame_id<0:
+            frame_id+=2
+        if frame_id>=sample_range:
+            frame_id-=2
+        return (vid, frame_id)
 
     def prepare_train_img(self, idx):
         # prepare a pair of image in a sequence
@@ -195,7 +193,8 @@ class YTVOSDataset(CustomDataset):
         img = cv2.imread(osp.join(self.img_prefix, vid_info['filenames'][frame_id]))
         basename = osp.basename(vid_info['filenames'][frame_id])
         ref_frame_id = self.sample_ref(idx)
-
+        ref_img = cv2.imread(osp.join(self.img_prefix, vid_info['filenames'][ref_frame_id]))
+        '''
         if ref_frame_id:
             ref_ann = self.get_ann_info(vid, ref_frame_id[1])
             masks = ref_ann['masks']
@@ -203,6 +202,7 @@ class YTVOSDataset(CustomDataset):
             masks=None
         if not masks:
             masks = [np.zeros(img.shape[:2], dtype=np.float32)]
+        '''
 
         # load proposals if necessary
         if self.proposals is not None:
@@ -237,18 +237,16 @@ class YTVOSDataset(CustomDataset):
         if len(gt_bboxes) == 0:
             return None
 
-        # extra augmentation
-        if self.extra_aug is not None:
-            img, gt_bboxes, gt_labels = self.extra_aug(img, gt_bboxes,
-                                                       gt_labels)
-
         # apply transforms
         flip = True if np.random.rand() < self.flip_ratio else False
         img_scale = random_scale(self.img_scales)  # sample a scale
         # print(img_scale)
         img, img_shape, pad_shape, scale_factor = self.img_transform(
             img, img_scale, flip, keep_ratio=self.resize_keep_ratio)
+        ref_img, ref_img_shape, _, ref_scale_factor = self.img_transform(
+            ref_img, img_scale, flip, keep_ratio=self.resize_keep_ratio)
         img = img.copy()
+        ref_img = ref_img.copy()
         if self.proposals is not None:
             proposals = self.bbox_transform(proposals, img_shape, scale_factor,
                                             flip)
@@ -263,10 +261,8 @@ class YTVOSDataset(CustomDataset):
             gt_masks = self.mask_transform(ann['masks'], pad_shape,
                                            scale_factor, flip)
 
-            masks = self.mask_transform(masks, pad_shape,
-                                           scale_factor, flip)
+            
 
-        mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0).astype(np.float32)
         ori_shape = (vid_info['height'], vid_info['width'], 3)
         img_meta = dict(
             ori_shape=ori_shape,
@@ -277,6 +273,7 @@ class YTVOSDataset(CustomDataset):
 
         data = dict(
             image=to_tensor(img),
+            ref_image=to_tensor(ref_img), 
             #img_meta=img_meta,
             height=img_shape[0],
             width=img_shape[1], 
@@ -295,7 +292,6 @@ class YTVOSDataset(CustomDataset):
 
         if self.with_crowd:
             data['gt_bboxes_ignore'] = to_tensor(gt_bboxes_ignore)
-        data['mask'] = mask
         data['annotations'] = ann
         return data
 
