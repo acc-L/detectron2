@@ -1,5 +1,6 @@
 _BASE_: "../../../../configs/Base-RCNN-FPN.yaml"
 MODEL:
+  META_ARCHITECTURE: "MaskGuildRCNN"
   ROI_HEADS:
     NAME: "PointRendROIHeads"
     IN_FEATURES: ["p2", "p3", "p4", "p5"]

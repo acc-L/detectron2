@@ -8,6 +8,7 @@ from detectron2.layers import ShapeSpec, cat, interpolate
 from typing import Dict, List, Optional, Tuple, Union
 from detectron2.structures import Boxes, ImageList, Instances, pairwise_iou
 from detectron2.modeling import ROI_HEADS_REGISTRY, StandardROIHeads
+from detectron2.modeling.roi_heads import FastRCNNOutputLayers
 from detectron2.modeling.roi_heads.mask_head import (
     build_mask_head, 
     mask_rcnn_inference,
@@ -69,11 +70,17 @@ class PointRendROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         # TODO use explicit args style
         super().__init__(cfg, input_shape)
-        self.choosed_classes = cfg.train.train_classes
+        self.choosed_classes = cfg.MODEL.FEATRURE_MERGE.CHOOSED_CLASSES
+        in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
+        in_channels = [input_shape[f].channels for f in in_features]
+        # Check all channel counts are equal
+        assert len(set(in_channels)) == 1, in_channels
+        in_channels = in_channels[0]
+        self.box_merger = BoxFeatureMerger(cfg, in_channels)
         self._init_mask_head(cfg, input_shape)
-    
+
     @classmethod
-    def _init_box_head(self, cfg, input_shape):
+    def _init_box_head(cls, cfg, input_shape):
         # fmt: off
         in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
         pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
@@ -101,14 +108,13 @@ class PointRendROIHeads(StandardROIHeads):
         box_head = build_box_head(
             cfg, ShapeSpec(channels=in_channels, height=pooler_resolution, width=pooler_resolution)
         )
-        box_merger = BoxFeatureMerger(cfg, in_channels)
-        box_predictor = SPFastRCNNOutputLayers(cfg, box_head.output_shape, ce_weight=cfg.train.CE_WEIGHT)
+        #ce_weight = mk_weights(cfg.MODEL.FEATRURE_MERGE.CHOOSED_CLASSES, cfg.MODEL.POINT_HEAD.NUM_CLASSES)
+        box_predictor = FastRCNNOutputLayers(cfg, box_head.output_shape)
         return {
             "box_in_features": in_features,
             "box_pooler": box_pooler,
             "box_head": box_head,
             "box_predictor": box_predictor,
-            "box_merger": box_merger, 
         }
     
     def _init_mask_head(self, cfg, input_shape):
@@ -121,7 +127,7 @@ class PointRendROIHeads(StandardROIHeads):
         self._feature_scales         = {k: 1.0 / v.stride for k, v in input_shape.items()}
         # fmt: on
 
-        in_channels = np.sum([input_shape[f].channels+1 for f in self.mask_coarse_in_features])
+        in_channels = np.sum([input_shape[f].channels for f in self.mask_coarse_in_features])
         self.mask_coarse_head = build_mask_head(
             cfg,
             ShapeSpec(
@@ -147,7 +153,7 @@ class PointRendROIHeads(StandardROIHeads):
         self.mask_point_subdivision_num_points  = cfg.MODEL.POINT_HEAD.SUBDIVISION_NUM_POINTS
         # fmt: on
 
-        in_channels = np.sum([input_shape[f].channels+1 for f in self.mask_point_in_features])
+        in_channels = np.sum([input_shape[f].channels for f in self.mask_point_in_features])
         self.mask_point_head = build_point_head(
             cfg, ShapeSpec(channels=in_channels, width=1, height=1)
         )
@@ -185,7 +191,6 @@ class PointRendROIHeads(StandardROIHeads):
         del targets
         if not mask:
             mask = np.zeros((10, 10), dtype=np.float32)
-        add_premask_on_features(features, mask)
 
         if self.training:
             losses = self._forward_box(features, ref_features, proposals)
@@ -225,9 +230,9 @@ class PointRendROIHeads(StandardROIHeads):
         if ref_features is None:
             box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
         else:
-            box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
-            ref_box_features = self.box_pooler(ref_features, [x.proposal_boxes for x in proposals])
-            box_features = self.box_merger(box_features, ref_box_features)
+            _box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+            _ref_box_features = self.box_pooler(ref_features, [x.proposal_boxes for x in proposals])
+            box_features = self.box_merger(_box_features, _ref_box_features)
 
         box_features = self.box_head(box_features)
         predictions = self.box_predictor(box_features)
@@ -266,7 +271,7 @@ class PointRendROIHeads(StandardROIHeads):
             return {} if self.training else instances
 
         if self.training:
-            proposals, _ = select_proposals_of_classes(instances, self.choosed_classes)
+            proposals, _ = select_foreground_proposals(instances, self.num_classes)
             proposal_boxes = [x.proposal_boxes for x in proposals]
             mask_coarse_logits = self._forward_mask_coarse(features, proposal_boxes)
 
@@ -384,34 +389,8 @@ def add_premask_on_features(features, rmask):
         rrmask = torch.cat(rrmasks, 0)
         features[key] = torch.cat([value, rrmask], 1)
 
-
-def select_proposals_of_classes(
-    proposals: List[Instances], choosed_class: List[int]
-) -> Tuple[List[Instances], List[torch.Tensor]]:
-    """
-    Given a list of N Instances (for N images), each containing a `gt_classes` field,
-    return a list of Instances that contain only instances with `gt_classes != -1 &&
-    gt_classes != bg_label`.
-
-    Args:
-        proposals (list[Instances]): A list of N Instances, where N is the number of
-            images in the batch.
-        bg_label: label index of background class.
-
-    Returns:
-        list[Instances]: N Instances, each contains only the selected foreground instances.
-        list[Tensor]: N boolean vector, correspond to the selection mask of
-            each Instances object. True for selected instances.
-    """
-    assert isinstance(proposals, (list, tuple))
-    assert isinstance(proposals[0], Instances)
-    assert proposals[0].has("gt_classes")
-    fg_proposals = []
-    fg_selection_masks = []
-    for proposals_per_image in proposals:
-        gt_classes = proposals_per_image.gt_classes
-        fg_selection_mask = (gt_classes != -1) & (gt_classes in choosed_class)
-        fg_idxs = fg_selection_mask.nonzero().squeeze(1)
-        fg_proposals.append(proposals_per_image[fg_idxs])
-        fg_selection_masks.append(fg_selection_mask)
-    return fg_proposals, fg_selection_masks
+def mk_weights(classes, num):
+    weights = np.zeros(num+1, dtype=np.float32)
+    for c in classes:
+        weights[c]=1
+    return torch.from_numpy(weights).cuda()

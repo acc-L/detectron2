@@ -124,8 +124,8 @@ class YTVOSEvaluator(COCOEvaluator):
                 "instances" that contains :class:`Instances`.
         """
         for input, output in zip(inputs, outputs):
-            prediction = {"frame_id": input['img_meta']["frame_id"], 
-                    "video_id":input['img_meta']["video_id"]}
+            prediction = {"frame_id": input["frame_id"], 
+                    "video_id":input["video_id"]}
 
             # TODO this is ugly
             if "instances" in output:
@@ -197,27 +197,28 @@ def inference_on_dataset_timestep(model, data_loader, evaluator):
     tmask = 0
     with inference_context(model), torch.no_grad():
         for idx, inputs in enumerate(data_loader):
+            print(idx)
             if idx == num_warmup:
                 start_time = time.perf_counter()
                 total_compute_time = 0
 
-            if inputs['frame_id']>0:
-                inputs['mask'] = tmask
+            if inputs[0]['frame_id']>0:
+                inputs[0]['mask'] = tmask
             
             start_compute_time = time.perf_counter()
             outputs = model(inputs)
 
-            outputs_instances = outputs['instances'].to('cpu')
+            outputs_instances = outputs[0]['instances'].to('cpu')
             output_masks = outputs_instances.pred_masks.detach().numpy()
             output_scores = outputs_instances.scores.detach().numpy()
-            final_choose_masks = np.array(np.zeros((1,)+inputs['image_shape']), dtype=np.uint8)
+            final_choose_masks = np.array(np.zeros((1,)+inputs[0]['img_shape']), dtype=np.uint8)
             final_choose_idx = []
             for other_id in range(len(output_scores)):
                 if output_scores[other_id] > 0.5:
                     final_choose_idx.append(other_id)
             if len(final_choose_idx) > 0:
                 final_choose_masks = output_masks[final_choose_idx]
-            tmask = np.sum(final_choose_masks)
+            tmask = np.sum(final_choose_masks, axis=0).astype(np.float32)
 
             if torch.cuda.is_available():
                 torch.cuda.synchronize()

@@ -40,10 +40,10 @@ from point_rend import (
 
 
 def train_mapper(datas):
-    label_map = {1:0, 8:16, 14:15}
+    label_map = {1:0, 4:14, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 38:14, 40:38}
     for ann in datas["annotations"]:
         ann.update({'bbox_mode':BoxMode.XYXY_ABS})
-        ann['category_id'] = label_map.get(ann['category_id'], -1)
+        ann['category_id'] = label_map.get(ann['category_id'], 80)
     instances = annotations_to_instances(
             datas["annotations"], datas["img_shape"], mask_format='bitmask')
     datas.pop('annotations')
@@ -130,6 +130,7 @@ class Trainer(DefaultTrainer):
             torch.nn.Module:
         """
         model = build_model(cfg)
+        print(model)
         logger = logging.getLogger(__name__)
         logger.info("Model:\n{}".format(model))
         for param in model.parameters():
@@ -166,11 +167,11 @@ class Trainer(DefaultTrainer):
             with_crowd=True,
             with_label=True,
             with_track=True)
-        dataset = YTVOSDataset(**train)
+        dataset.img_ids = dataset.img_ids[10:]
         return build_detection_train_loader(dataset, cfg)
 
     @classmethod
-    def build_test_loader(cls, cfg, dateset_name):
+    def build_test_loader_e(cls, cfg, dateset_name):
         dataset_type = 'YTVOSDataset'
         data_root = '/data/youtube-VIS/'
         img_norm_cfg = dict(
@@ -179,6 +180,27 @@ class Trainer(DefaultTrainer):
         val=dict(
                 ann_file=data_root + 'annotation/valid.json',
                 img_prefix=data_root + 'valid/JPEGImages',
+                img_scale=(1280, 720),
+                img_norm_cfg=img_norm_cfg,
+                size_divisor=32,
+                flip_ratio=0,
+                with_mask=True,
+                with_crowd=True,
+                with_label=True,
+                test_mode=True)
+        dataset = YTVOSDataset(**val)
+        return build_detection_test_loader(dataset, cfg)
+    
+    @classmethod
+    def build_test_loader(cls, cfg, dateset_name):
+        dataset_type = 'YTVOSDataset'
+        data_root = '/data/youtube-VIS/'
+        img_norm_cfg = dict(
+                mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
+
+        val=dict(
+                ann_file=data_root + 'annotation/train.json',
+                img_prefix=data_root + 'train/JPEGImages',
                 img_scale=(1280, 720),
                 img_norm_cfg=img_norm_cfg,
                 size_divisor=32,

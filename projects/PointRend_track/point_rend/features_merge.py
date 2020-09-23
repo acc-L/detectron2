@@ -37,7 +37,7 @@ class BoxFeatureMerger(nn.Module):
         conv_dim = input_channels
         self.conv_layers = []
         for k in range(num_conv):
-            conv = nn.Conv2d(conv_dim_in, conv_dim, kernel_size=3, stride=1, padding=0, bias=True)
+            conv = nn.Conv2d(conv_dim_in, conv_dim, kernel_size=3, stride=1, padding=1, bias=True)
             self.add_module("conv{}".format(k + 1), conv)
             self.conv_layers.append(conv)
             conv_dim_in = conv_dim
@@ -49,5 +49,6 @@ class BoxFeatureMerger(nn.Module):
         x = torch.cat((box_feature, ref_box_feature), dim=1)
         for layer in self.conv_layers:
             x = F.relu(layer(x))
+        x = x + box_feature
         return x
 

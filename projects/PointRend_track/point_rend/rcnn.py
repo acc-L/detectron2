@@ -45,7 +45,6 @@ class MaskGuildRCNN(GeneralizedRCNN):
             return self.inference(batched_inputs)
 
         images, ref_images = self.preprocess_image(batched_inputs)
-        mask = [binput['mask'] for binput in batched_inputs]
         if "instances" in batched_inputs[0]:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
         else:
@@ -54,7 +53,7 @@ class MaskGuildRCNN(GeneralizedRCNN):
         with torch.no_grad():
             features = self.backbone(images.tensor)
             ref_features = self.backbone(ref_images.tensor)
-            ref_features = [ref_features[f] for f in self.box_in_features]
+            ref_features = [ref_features[f] for f in self.roi_heads.box_in_features]
 
             if self.proposal_generator:
                 proposals, _ = self.proposal_generator(images, features, gt_instances)
@@ -62,7 +61,7 @@ class MaskGuildRCNN(GeneralizedRCNN):
                 assert "proposals" in batched_inputs[0]
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
-        _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, mask)
+        _, detector_losses = self.roi_heads(images, features, ref_features, proposals, gt_instances)
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:
@@ -90,11 +89,11 @@ class MaskGuildRCNN(GeneralizedRCNN):
             same as in :meth:`forward`.
         """
         assert not self.training
+        assert len(batched_inputs)==1
 
-        images = self.preprocess_image(batched_inputs)
-        masks = [binput['mask'] for binput in batched_inputs]
-        if batched_inputs[0]['frame_id']==0:
-            ref_features = None
+        images, _ = self.preprocess_image(batched_inputs)
+        if batched_inputs[0]['is_first']:
+            self.ref_features = None
         features = self.backbone(images.tensor)
 
         if detected_instances is None:
@@ -104,12 +103,12 @@ class MaskGuildRCNN(GeneralizedRCNN):
                 assert "proposals" in batched_inputs[0]
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
-            results, _ = self.roi_heads(images, features, proposals, None, masks)
+            results, _ = self.roi_heads(images, features, self.ref_features, proposals, None)
         else:
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
-        ref_features = [features[f] for f in self.box_in_features]
+        self.ref_features = [features[f] for f in self.roi_heads.box_in_features]
 
         if do_postprocess:
             return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
@@ -122,6 +121,9 @@ class MaskGuildRCNN(GeneralizedRCNN):
         """
         images = [x["image"].to(self.device) for x in batched_inputs]
         images = ImageList.from_tensors(images, self.backbone.size_divisibility)
-        ref_images = [x["ref_image"].to(self.device) for x in batched_inputs]
-        ref_images = ImageList.from_tensors(ref_images, self.backbone.size_divisibility)
+        try:
+            ref_images = [x["ref_image"].to(self.device) for x in batched_inputs]
+            ref_images = ImageList.from_tensors(ref_images, self.backbone.size_divisibility)
+        except:
+            ref_images = None
         return images, ref_images

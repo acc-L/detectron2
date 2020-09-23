@@ -34,12 +34,15 @@ class YTVOSDataset(CustomDataset):
                  extra_aug=None,
                  aug_ref_bbox_param=None,
                  resize_keep_ratio=True,
-                 test_mode=False):
+                 test_mode=False,
+                 valid_=False):
         # prefix of images path
         self.img_prefix = img_prefix
 
         # load annotations (and proposals)
         self.vid_infos = self.load_annotations(ann_file)
+        if valid:
+            vid_infos = vid_infos[:10]
         img_ids = []
         for idx, vid_info in enumerate(self.vid_infos):
           for frame_id in range(len(vid_info['filenames'])):
@@ -193,7 +196,7 @@ class YTVOSDataset(CustomDataset):
         img = cv2.imread(osp.join(self.img_prefix, vid_info['filenames'][frame_id]))
         basename = osp.basename(vid_info['filenames'][frame_id])
         ref_frame_id = self.sample_ref(idx)
-        ref_img = cv2.imread(osp.join(self.img_prefix, vid_info['filenames'][ref_frame_id]))
+        ref_img = cv2.imread(osp.join(self.img_prefix, vid_info['filenames'][ref_frame_id[1]]))
         '''
         if ref_frame_id:
             ref_ann = self.get_ann_info(vid, ref_frame_id[1])
@@ -347,7 +350,9 @@ class YTVOSDataset(CustomDataset):
         img, img_meta, proposal, masks = prepare_single(
                 img, frame_id, self.img_scales[0], False, masks, proposal)
         mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0)
-        data = dict(image=img, img_meta=img_meta, mask=mask)
+        data = dict(image=img, is_first=img_meta['is_first'], video_id=img_meta['video_id'], 
+                frame_id=img_meta['frame_id'], img_shape=img_meta['img_shape'])
+        data['is_first'] = True
         return data
 
     def _parse_ann_info(self, ann_info, frame_id, with_mask=True):

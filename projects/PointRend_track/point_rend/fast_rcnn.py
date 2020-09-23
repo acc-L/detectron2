@@ -12,7 +12,7 @@ from detectron2.modeling.box_regression import Box2BoxTransform
 from detectron2.structures import Boxes, Instances
 from detectron2.utils.events import get_event_storage
 
-__all__ = ["fast_rcnn_inference", "FastRCNNOutputLayers"]
+__all__ = ["fast_rcnn_inference", "SPFastRCNNOutputLayers"]
 
 
 logger = logging.getLogger(__name__)
@@ -413,7 +413,7 @@ class SPFastRCNNOutputLayers(nn.Module):
         if isinstance(loss_weight, float):
             loss_weight = {"loss_cls": loss_weight, "loss_box_reg": loss_weight}
         self.loss_weight = loss_weight
-        self.ce_weight = cd_weight
+        self.ce_weight = ce_weight
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -455,7 +455,7 @@ class SPFastRCNNOutputLayers(nn.Module):
                 that were used to compute predictions.
         """
         scores, proposal_deltas = predictions
-        losses = FastRCNNOutputs(
+        losses = SPFastRCNNOutputs(
             self.box2box_transform,
             scores,
             proposal_deltas,

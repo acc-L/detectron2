@@ -27,6 +27,10 @@ def add_pointrend_config(cfg):
     cfg.MODEL.POINT_HEAD = CN()
     cfg.MODEL.POINT_HEAD.NAME = "StandardPointHead"
     cfg.MODEL.POINT_HEAD.NUM_CLASSES = 80
+
+    cfg.MODEL.FEATRURE_MERGE = CN()
+    cfg.MODEL.FEATRURE_MERGE.NUM_CONV = 3
+    cfg.MODEL.FEATRURE_MERGE.CHOOSED_CLASSES = [0, 15, 16]
     # Names of the input feature maps to be used by a mask point head.
     cfg.MODEL.POINT_HEAD.IN_FEATURES = ("p2",)
     # Number of points sampled during training for a mask point head.
@@ -47,3 +51,5 @@ def add_pointrend_config(cfg):
     # If True, then coarse prediction features are used as inout for each layer in PointRend's MLP.
     cfg.MODEL.POINT_HEAD.COARSE_PRED_EACH_LAYER = True
     cfg.MODEL.POINT_HEAD.COARSE_SEM_SEG_HEAD_NAME = "SemSegFPNHead"
+    cfg.SOLVER.BASE_LR = 0.002
+    cfg.SOLVER.MAX_ITER = 30000
