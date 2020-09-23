@@ -70,7 +70,7 @@ def instances_to_ytvis_json(instances, img_id, vid):
             "score": scores[k],
         }
         if has_mask:
-            result["segmentation"] = rles[k]
+            result["segmentations"] = rles[k]
         if has_keypoints:
             # In COCO annotations,
             # keypoints coordinates are pixel indices.

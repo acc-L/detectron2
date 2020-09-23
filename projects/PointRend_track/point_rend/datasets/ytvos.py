@@ -42,7 +42,7 @@ class YTVOSDataset(CustomDataset):
         # load annotations (and proposals)
         self.vid_infos = self.load_annotations(ann_file)
         if valid:
-            vid_infos = vid_infos[:10]
+            self.vid_infos = self.vid_infos[:2]
         img_ids = []
         for idx, vid_info in enumerate(self.vid_infos):
           for frame_id in range(len(vid_info['filenames'])):
@@ -309,15 +309,15 @@ class YTVOSDataset(CustomDataset):
         else:
             ref_frame_id = None
 
-        if ref_frame_id:
-            ref_ann = self.get_ann_info(vid, ref_frame_id)
-            masks = ref_ann['masks']
-        else:
-            masks=None
-        if not masks:
-            masks = [np.zeros(img.shape[:2], dtype=np.float32)]
+        #if ref_frame_id:
+        #    ref_ann = self.get_ann_info(vid, ref_frame_id)
+        #    masks = ref_ann['masks']
+        #else:
+        #    masks=None
+        #if not masks:
+        #    masks = [np.zeros(img.shape[:2], dtype=np.float32)]
 
-        def prepare_single(img, frame_id, scale, flip, masks, proposal=None):
+        def prepare_single(img, frame_id, scale, flip, proposal=None):
             _img, img_shape, pad_shape, scale_factor = self.img_transform(
                 img, scale, flip, keep_ratio=self.resize_keep_ratio)
             _img = to_tensor(_img)
@@ -330,8 +330,8 @@ class YTVOSDataset(CustomDataset):
                 frame_id =frame_id,
                 scale_factor=scale_factor,
                 flip=flip)
-            _mask = self.mask_transform(masks, pad_shape,
-                                           scale_factor, flip)
+            #_mask = self.mask_transform(masks, pad_shape,
+            #                               scale_factor, flip)
             if proposal is not None:
                 if proposal.shape[1] == 5:
                     score = proposal[:, 4, None]
@@ -345,11 +345,11 @@ class YTVOSDataset(CustomDataset):
                 _proposal = to_tensor(_proposal)
             else:
                 _proposal = None
-            return _img, _img_meta, _proposal, _mask
+            return _img, _img_meta, _proposal
 
-        img, img_meta, proposal, masks = prepare_single(
-                img, frame_id, self.img_scales[0], False, masks, proposal)
-        mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0)
+        img, img_meta, proposal = prepare_single(
+                img, frame_id, self.img_scales[0], False, proposal)
+        #mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0)
         data = dict(image=img, is_first=img_meta['is_first'], video_id=img_meta['video_id'], 
                 frame_id=img_meta['frame_id'], img_shape=img_meta['img_shape'])
         data['is_first'] = True
