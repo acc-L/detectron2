@@ -210,6 +210,7 @@ class Trainer(DefaultTrainer):
                 with_mask=True,
                 with_crowd=True,
                 with_label=True,
+                test_mode=True, 
                 valid=True
                 )
         dataset = YTVOSDataset(**val)
