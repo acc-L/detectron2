@@ -15,6 +15,8 @@ from detectron2.utils.comm import get_world_size, is_main_process
 from detectron2.utils.logger import log_every_n_seconds
 
 import pycocotools.mask as mask_util
+from pycocotools.ytvos import YTVOS
+from pycocotools.ytvoseval import YTVOSeval
 from fvcore.common.file_io import PathManager
 from contextlib import contextmanager
 
@@ -85,7 +87,7 @@ class YTVOSEvaluator(COCOEvaluator):
     Evaluator for youtube-VIS
     based on COCOAPI
     """
-    def __init__(self, dataset_name, cfg, distributed, output_dir=None):
+    def __init__(self, dataset_name, annfile, cfg, distributed, output_dir=None):
         """
         Args:
             dataset_name (str): name of the dataset to be evaluated.
@@ -110,6 +112,7 @@ class YTVOSEvaluator(COCOEvaluator):
         self._tasks = self._tasks_from_config(cfg)
         self._distributed = distributed
         self._output_dir = output_dir
+        self.annfile = annfile
 
         self._cpu_device = torch.device("cpu")
         self._logger = logging.getLogger(__name__)
@@ -158,8 +161,18 @@ class YTVOSEvaluator(COCOEvaluator):
                 pickle.dump(predictions, f)
 
         res = OrderedDict()
+        self._eval_ytvos_res(self.annfile, predictions)
         res['res'] = {'vis':[0,0,0,0]}
         return res
+
+    def _eval_ytvos_res(self, ann_file, predictions):
+        vos_gt = YTVOS(ann_file)
+        vos_dt = vos_gt.loadRes(predictions)
+        vos_eval = YTVOSeval(vos_gt, vos_dt)
+        vos_eval.evaluate()
+        vos_eval.accumulate()
+        vos_eval.summarize()
+
 
 def inference_on_dataset_timestep(model, data_loader, evaluator):
     """

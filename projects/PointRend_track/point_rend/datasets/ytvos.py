@@ -35,7 +35,7 @@ class YTVOSDataset(CustomDataset):
                  aug_ref_bbox_param=None,
                  resize_keep_ratio=True,
                  test_mode=False,
-                 valid_=False):
+                 valid =False):
         # prefix of images path
         self.img_prefix = img_prefix
 

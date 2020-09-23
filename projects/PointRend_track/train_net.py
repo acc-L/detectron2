@@ -147,7 +147,9 @@ class Trainer(DefaultTrainer):
         For your own dataset, you can simply create an evaluator manually in your
         script and do not have to worry about the hacky if-else logic here.
         """
-        return YTVOSEvaluator(dataset_name, cfg, True, output_folder)
+        data_root = '/data/youtube-VIS/'
+        ann_file=data_root + 'annotation/train.json'
+        return YTVOSEvaluator(dataset_name, ann_file, cfg, True, output_folder)
 
     @classmethod
     def build_train_loader(cls, cfg):
@@ -208,7 +210,8 @@ class Trainer(DefaultTrainer):
                 with_mask=True,
                 with_crowd=True,
                 with_label=True,
-                test_mode=True)
+                valid=True
+                )
         dataset = YTVOSDataset(**val)
         return build_detection_test_loader(dataset, cfg)
 
