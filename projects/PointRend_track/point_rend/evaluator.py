@@ -82,6 +82,19 @@ def instances_to_ytvis_json(instances, img_id, vid):
         results.append(result)
     return results
 
+def convert_for_eval(prediction):
+    seg = [res["segmentation"] for res in prediction['instances']]
+    bbox = [res["bbox"] for res in prediction['instances']]
+    category = [res["category_id"] for res in prediction['instances']]
+    score = [res["score"] for res in prediction['instances']]
+    prediction.pop('instances')
+    prediction["segmentation"] = seg
+    prediction["bboxes"] = bbox
+    prediction["category_ids"] = category
+    prediction["scores"] = score
+    return prediction
+
+
 class YTVOSEvaluator(COCOEvaluator):
     """
     Evaluator for youtube-VIS
@@ -161,7 +174,8 @@ class YTVOSEvaluator(COCOEvaluator):
                 pickle.dump(predictions, f)
 
         res = OrderedDict()
-        self._eval_ytvos_res(self.annfile, predictions)
+        result = [convert_for_eval(p) for p in predictions]
+        self._eval_ytvos_res(self.annfile, result)
         res['res'] = {'vis':[0,0,0,0]}
         return res
 
