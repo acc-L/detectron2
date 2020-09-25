@@ -6,7 +6,7 @@ from .custom import CustomDataset
 from .extra_aug import ExtraAugmentation
 from .transforms import (ImageTransform, BboxTransform, MaskTransform,
                          Numpy2Tensor)
-from pycocotools2.ytvos import YTVOS
+from pycocotools.ytvos import YTVOS
 #from mmcv.parallel import DataContainer as DC
 from .utils import to_tensor, random_scale
 
@@ -34,15 +34,12 @@ class YTVOSDataset(CustomDataset):
                  extra_aug=None,
                  aug_ref_bbox_param=None,
                  resize_keep_ratio=True,
-                 test_mode=False,
-                 valid =False):
+                 test_mode=False):
         # prefix of images path
         self.img_prefix = img_prefix
 
         # load annotations (and proposals)
         self.vid_infos = self.load_annotations(ann_file)
-        #if valid:
-        #    self.vid_infos = self.vid_infos[:5]
         img_ids = []
         for idx, vid_info in enumerate(self.vid_infos):
           for frame_id in range(len(vid_info['filenames'])):
@@ -304,16 +301,20 @@ class YTVOSDataset(CustomDataset):
         vid_info = self.vid_infos[vid]
         img = cv2.imread(osp.join(self.img_prefix, vid_info['filenames'][frame_id]))
         proposal = None
+        if frame_id>0:
+            ref_frame_id = (vid, frame_id-1)
+        else:
+            ref_frame_id = None
 
-        #if ref_frame_id:
-        #    ref_ann = self.get_ann_info(vid, ref_frame_id)
-        #    masks = ref_ann['masks']
-        #else:
-        #    masks=None
-        #if not masks:
-        #    masks = [np.zeros(img.shape[:2], dtype=np.float32)]
+        if ref_frame_id:
+            ref_ann = self.get_ann_info(vid, ref_frame_id)
+            masks = ref_ann['masks']
+        else:
+            masks=None
+        if not masks:
+            masks = [np.zeros(img.shape[:2], dtype=np.float32)]
 
-        def prepare_single(img, frame_id, scale, flip, proposal=None):
+        def prepare_single(img, frame_id, scale, flip, masks, proposal=None):
             _img, img_shape, pad_shape, scale_factor = self.img_transform(
                 img, scale, flip, keep_ratio=self.resize_keep_ratio)
             _img = to_tensor(_img)
@@ -326,8 +327,8 @@ class YTVOSDataset(CustomDataset):
                 frame_id =frame_id,
                 scale_factor=scale_factor,
                 flip=flip)
-            #_mask = self.mask_transform(masks, pad_shape,
-            #                               scale_factor, flip)
+            _mask = self.mask_transform(masks, pad_shape,
+                                           scale_factor, flip)
             if proposal is not None:
                 if proposal.shape[1] == 5:
                     score = proposal[:, 4, None]
@@ -341,11 +342,11 @@ class YTVOSDataset(CustomDataset):
                 _proposal = to_tensor(_proposal)
             else:
                 _proposal = None
-            return _img, _img_meta, _proposal
+            return _img, _img_meta, _proposal, _mask
 
-        img, img_meta, proposal = prepare_single(
-                img, frame_id, self.img_scales[0], False, proposal)
-        #mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0)
+        img, img_meta, proposal, masks = prepare_single(
+                img, frame_id, self.img_scales[0], False, masks, proposal)
+        mask =  np.sum([mask[np.newaxis,:,:]for mask in masks], axis=0)
         data = dict(image=img, is_first=img_meta['is_first'], video_id=img_meta['video_id'], 
                 frame_id=img_meta['frame_id'], img_shape=img_meta['img_shape'])
         data['is_first'] = True

@@ -33,7 +33,8 @@ from detectron2.evaluation import verify_results, DatasetEvaluator, DatasetEvalu
 from point_rend import (
     ColorAugSSDTransform, 
     add_pointrend_config, 
-    YTVOSDataset, 
+    YTVOSDataset,
+    COCODataset, 
     YTVOSEvaluator, 
     inference_on_dataset_timestep,
 )
@@ -137,6 +138,8 @@ class Trainer(DefaultTrainer):
             param.requires_grad = False
         for param in model.roi_heads.box_merger.parameters():
             param.requires_grad = True
+        for param in model.roi_heads.mask_coarse_head.parameters():
+            param.requires_grad = True
         return model
 
     @classmethod
@@ -148,7 +151,7 @@ class Trainer(DefaultTrainer):
         script and do not have to worry about the hacky if-else logic here.
         """
         data_root = '/data/youtube-VIS/'
-        ann_file=data_root + 'annotation/train.json'
+        ann_file=data_root + 'annotation/valid_e.json'
         return YTVOSEvaluator(dataset_name, ann_file, cfg, True, output_folder)
 
     @classmethod
@@ -159,7 +162,7 @@ class Trainer(DefaultTrainer):
                 mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
 
         train=dict(
-            ann_file=data_root + 'annotation/train.json',
+            ann_file=data_root + 'annotation/train_e.json',
             img_prefix=data_root + 'train/JPEGImages',
             img_scale=(1280, 720),
             img_norm_cfg=img_norm_cfg,
@@ -169,7 +172,7 @@ class Trainer(DefaultTrainer):
             with_crowd=True,
             with_label=True,
             with_track=True)
-        dataset.img_ids = dataset.img_ids[10:]
+        dataset = YTVOSDataset(**train)
         return build_detection_train_loader(dataset, cfg)
 
     @classmethod
@@ -201,7 +204,7 @@ class Trainer(DefaultTrainer):
                 mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
 
         val=dict(
-                ann_file=data_root + 'annotation/train.json',
+                ann_file=data_root + 'annotation/valid_e.json',
                 img_prefix=data_root + 'train/JPEGImages',
                 img_scale=(1280, 720),
                 img_norm_cfg=img_norm_cfg,
@@ -210,12 +213,12 @@ class Trainer(DefaultTrainer):
                 with_mask=True,
                 with_crowd=True,
                 with_label=True,
-                test_mode=True, 
-                valid=True
+                test_mode=True
                 )
-        dataset = YTVOSDataset(**val)
+        dataset = COCODataset(**val)
         return build_detection_test_loader(dataset, cfg)
 
+    '''
     @classmethod
     def test(cls, cfg, model, evaluators=None):
         """
@@ -267,7 +270,7 @@ class Trainer(DefaultTrainer):
         if len(results) == 1:
             results = list(results.values())[0]
         return results
-
+    '''
 
 def setup(args):
     """
