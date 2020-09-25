@@ -120,9 +120,11 @@ class MaskGuildRCNN(GeneralizedRCNN):
         Normalize, pad and batch the input images.
         """
         images = [x["image"].to(self.device) for x in batched_inputs]
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(images, self.backbone.size_divisibility)
         try:
             ref_images = [x["ref_image"].to(self.device) for x in batched_inputs]
+            ref_images = [(x - self.pixel_mean) / self.pixel_std for x in ref_images]
             ref_images = ImageList.from_tensors(ref_images, self.backbone.size_divisibility)
         except:
             ref_images = None

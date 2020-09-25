@@ -6,7 +6,7 @@ from .custom import CustomDataset
 from .extra_aug import ExtraAugmentation
 from .transforms import (ImageTransform, BboxTransform, MaskTransform,
                          Numpy2Tensor)
-from pycocotools.coco import COCO
+from pycocotools2.coco import COCO
 #from mmcv.parallel import DataContainer as DC
 from .utils import to_tensor, random_scale
 
@@ -62,6 +62,7 @@ class COCODataset(CustomDataset):
         # padding border to ensure the image size can be divided by
         # size_divisor (used for FPN)
         self.size_divisor = size_divisor
+        self.img_scales = img_scale if isinstance(img_scale,list) else [img_scale]
 
         # with mask or not (reserved field, takes no effect)
         self.with_mask = with_mask
@@ -117,8 +118,11 @@ class COCODataset(CustomDataset):
 
     def get_ann_info(self, idx):
         vid_id = self.vid_infos[idx]['id']
-        ann_ids = self.ytvos.getAnnIds(vidIds=[vid_id])
+        #print(vid_id)
+        ann_ids = self.ytvos.getAnnIds(imgIds=[vid_id])
+        #print(ann_ids)
         ann_info = self.ytvos.loadAnns(ann_ids)
+        #print([info['image_id'] for info in ann_info])
         #return self._parse_ann_info(ann_info, frame_id)
         return ann_info
 
@@ -151,6 +155,8 @@ class COCODataset(CustomDataset):
         vid_info = self.vid_infos[idx]
         # load image
         img = cv2.imread(osp.join(self.img_prefix, vid_info['file_name']))
+        img_shape = img.shape[:2]
+        #img = cv2.resize(img, self.img_scales[0])
         basename = osp.basename(vid_info['file_name'])
 
         # load proposals if necessary
@@ -172,9 +178,23 @@ class COCODataset(CustomDataset):
                 scores = None
 
         anns = self.get_ann_info(idx)
-        gt_labels = [ann['category_id'] for ann in anns]
-        gt_bboxes = [ann['bbox'] for ann in anns]
-        gt_masks = [self.ytvos.annToMask(ann['segementation']) for ann in anns]
+        #print(idx)
+        #print(vid_info)
+        #print(anns)
+        gt_labels = np.array([ann['category_id'] for ann in anns])
+        gt_bboxes = np.array([ann['bbox'] for ann in anns])
+        gt_bboxes[:,2] += (gt_bboxes[:,0] - 1)
+        gt_bboxes[:,3] += (gt_bboxes[:,1] - 1)
+        #gt_masks = [cv2.resize(self.ytvos.annToMask(ann), self.img_scales[0]) for ann in anns]
+        gt_masks = [self.ytvos.annToMask(ann) for ann in anns]
+
+        img, _, pad_shape, scale_factor = self.img_transform(
+            img, self.img_scales[0], False, keep_ratio=self.resize_keep_ratio)
+        #img = img.copy()
+        #gt_bboxes = self.bbox_transform(gt_bboxes, img_shape, scale_factor,
+        #                               False)
+
+        #gt_masks = self.mask_transform(gt_masks, pad_shape, scale_factor, False)
         
         # compute matching of reference frame with current frame
         # 0 denote there is no matching
@@ -182,33 +202,15 @@ class COCODataset(CustomDataset):
         if len(gt_bboxes) == 0:
             return None
 
-        # apply transforms
-        flip = True if np.random.rand() < self.flip_ratio else False
-        img_scale = random_scale(self.img_scales)  # sample a scale
-        # print(img_scale)
-        img, img_shape, pad_shape, scale_factor = self.img_transform(
-            img, img_scale, flip, keep_ratio=self.resize_keep_ratio)
-        img = img.copy()
-        if self.proposals is not None:
-            proposals = self.bbox_transform(proposals, img_shape, scale_factor,
-                                            flip)
-            proposals = np.hstack(
-                [proposals, scores]) if scores is not None else proposals
-        gt_bboxes = self.bbox_transform(gt_bboxes, img_shape, scale_factor,
-                                        flip)
-        if self.with_mask:
-            gt_masks = self.mask_transform(gt_masks, pad_shape,
-                                           scale_factor, flip)
-
-            
-
         ori_shape = (vid_info['height'], vid_info['width'], 3)
+        '''
         img_meta = dict(
             ori_shape=ori_shape,
             img_shape=img_shape,
-            pad_shape=pad_shape,
+            #pad_shape=pad_shape,
             scale_factor=scale_factor,
             flip=flip)
+        '''
 
         data = dict(
             image=to_tensor(img),
@@ -216,10 +218,11 @@ class COCODataset(CustomDataset):
             height=img_shape[0],
             width=img_shape[1], 
             img_shape=img_shape, 
+            image_id = vid_info['id'], 
         )
         ann = []
         for i, bbox in enumerate(gt_bboxes):
-            instance = {'bbox':bbox}
+            instance = {'bbox':bbox, 'bbox_mode':0}
             if self.proposals is not None:
                 instance['proposals'] = to_tensor(proposals)
             if self.with_label:
@@ -229,12 +232,13 @@ class COCODataset(CustomDataset):
             ann.append(instance)
 
         data['annotations'] = ann
+        data['img_file'] = vid_info['file_name']
         return data
 
     def prepare_test_img(self, idx):
         """Prepare an image for testing (multi-scale and flipping)"""
         vid_info = self.vid_infos[idx]
-        img = cv2.imread(osp.join(self.img_prefix, vid_info['filename']))
+        img = cv2.imread(osp.join(self.img_prefix, vid_info['file_name']))
         proposal = None
 
         def prepare_single(img, scale, flip, proposal=None):
@@ -265,6 +269,7 @@ class COCODataset(CustomDataset):
 
         img, img_meta, proposal, = prepare_single(
                 img, self.img_scales[0], False, proposal)
-        data = dict(image=img, is_first=img_meta['is_first'], video_id=img_meta['video_id'], 
-                frame_id=img_meta['frame_id'], img_shape=img_meta['img_shape'])
+        data = dict(image=img, is_first=img_meta['is_first'], 
+                id=vid_info['id'], img_shape=img_meta['img_shape'])
+        #data['is_first'] = True
         return data
