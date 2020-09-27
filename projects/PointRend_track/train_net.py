@@ -137,10 +137,10 @@ class Trainer(DefaultTrainer):
         logger.info("Model:\n{}".format(model))
         for param in model.parameters():
             param.requires_grad = False
-        for param in model.roi_heads.box_merger.parameters():
-            param.requires_grad = True
-        for param in model.roi_heads.mask_coarse_head.parameters():
-            param.requires_grad = True
+        #for param in model.roi_heads.box_merger.parameters():
+        #    param.requires_grad = True
+        #for param in model.roi_heads.mask_coarse_head.parameters():
+        #    param.requires_grad = True
         return model
 
     @classmethod

@@ -191,8 +191,8 @@ class PointRendROIHeads(StandardROIHeads):
         if self.training:
             assert targets
             proposals = self.label_and_sample_proposals(proposals, targets)
-        else:
-            _add_bbox_from_last_frame(proposals, self.ref_proposals)
+        #else:
+        #    proposals = _add_bbox_from_last_frame(proposals, self.ref_proposals)
         del targets
 
         if self.training:
@@ -251,7 +251,7 @@ class PointRendROIHeads(StandardROIHeads):
                     )
                     for proposals_per_image, pred_boxes_per_image in zip(proposals, pred_boxes):
                         proposals_per_image.proposal_boxes = Boxes(pred_boxes_per_image)
-            return losses
+                return losses
         else:
             pred_instances, _ = self.box_predictor.inference(predictions, proposals)
             self.ref_proposals = pred_instances
@@ -402,6 +402,16 @@ def mk_weights(classes, num):
 
 def _add_bbox_from_last_frame(proposals, pred_boxes):
     if pred_boxes is None:
-        return
-    proposals.extend(pred_boxes)
+        return proposals
+    res = []
+    for pred, proposal in zip(pred_boxes, proposals):
+        pred.proposal_boxes = pred.pred_boxes
+        pred.remove('pred_boxes')
+        pred.remove('pred_classes')
+        pred.remove('scores')
+
+        logits, _ = torch.sort(proposal.objectness_logits, descending=True)
+        pred.objectness_logits = logits[:len(pred)]
+        res.append(proposal.cat([proposal, pred]))
+    return res
     
