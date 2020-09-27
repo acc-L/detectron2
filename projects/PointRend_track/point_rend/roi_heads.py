@@ -70,6 +70,8 @@ class PointRendROIHeads(StandardROIHeads):
     def __init__(self, cfg, input_shape):
         # TODO use explicit args style
         super().__init__(cfg, input_shape)
+        self.ref_proposals = None
+        '''
         self.choosed_classes = cfg.MODEL.FEATRURE_MERGE.CHOOSED_CLASSES
         in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
         in_channels = [input_shape[f].channels for f in in_features]
@@ -77,6 +79,7 @@ class PointRendROIHeads(StandardROIHeads):
         assert len(set(in_channels)) == 1, in_channels
         in_channels = in_channels[0]
         self.box_merger = BoxFeatureMerger(cfg, in_channels)
+        '''
         self._init_mask_head(cfg, input_shape)
 
     @classmethod
@@ -188,9 +191,9 @@ class PointRendROIHeads(StandardROIHeads):
         if self.training:
             assert targets
             proposals = self.label_and_sample_proposals(proposals, targets)
+        else:
+            _add_bbox_from_last_frame(proposals, self.ref_proposals)
         del targets
-        if not mask:
-            mask = np.zeros((10, 10), dtype=np.float32)
 
         if self.training:
             losses = self._forward_box(features, ref_features, proposals)
@@ -251,6 +254,7 @@ class PointRendROIHeads(StandardROIHeads):
             return losses
         else:
             pred_instances, _ = self.box_predictor.inference(predictions, proposals)
+            self.ref_proposals = pred_instances
             return pred_instances
 
     def _forward_mask(self, features, instances):
@@ -394,3 +398,10 @@ def mk_weights(classes, num):
     for c in classes:
         weights[c]=1
     return torch.from_numpy(weights).cuda()
+
+
+def _add_bbox_from_last_frame(proposals, pred_boxes):
+    if pred_boxes is None:
+        return
+    proposals.extend(pred_boxes)
+    

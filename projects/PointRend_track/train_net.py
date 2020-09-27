@@ -36,6 +36,7 @@ from point_rend import (
     YTVOSDataset,
     COCODataset, 
     YTVOSEvaluator, 
+    COCODataset,
     inference_on_dataset_timestep,
 )
 

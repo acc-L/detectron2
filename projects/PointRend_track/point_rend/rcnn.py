@@ -93,7 +93,8 @@ class MaskGuildRCNN(GeneralizedRCNN):
 
         images, _ = self.preprocess_image(batched_inputs)
         if batched_inputs[0]['is_first']:
-            self.ref_features = None
+            self.roi_heads.ref_proposals = None
+        self.ref_features = None
         features = self.backbone(images.tensor)
 
         if detected_instances is None:
@@ -108,7 +109,6 @@ class MaskGuildRCNN(GeneralizedRCNN):
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
-        self.ref_features = [features[f] for f in self.roi_heads.box_in_features]
 
         if do_postprocess:
             return GeneralizedRCNN._postprocess(results, batched_inputs, images.image_sizes)
