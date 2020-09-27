@@ -238,38 +238,9 @@ class COCODataset(CustomDataset):
     def prepare_test_img(self, idx):
         """Prepare an image for testing (multi-scale and flipping)"""
         vid_info = self.vid_infos[idx]
-        img = cv2.imread(osp.join(self.img_prefix, vid_info['file_name']))
-        proposal = None
-
-        def prepare_single(img, scale, flip, proposal=None):
-            _img, img_shape, pad_shape, scale_factor = self.img_transform(
-                img, scale, flip, keep_ratio=self.resize_keep_ratio)
-            _img = to_tensor(_img)
-            _img_meta = dict(
-                ori_shape=(vid_info['height'], vid_info['width'], 3),
-                img_shape=img_shape,
-                pad_shape=pad_shape,
-                is_first=(vid_info['id'] == vid_info['start_id']),
-                scale_factor=scale_factor,
-                flip=flip)
-            if proposal is not None:
-                if proposal.shape[1] == 5:
-                    score = proposal[:, 4, None]
-                    proposal = proposal[:, :4]
-                else:
-                    score = None
-                _proposal = self.bbox_transform(proposal, img_shape,
-                                                scale_factor, flip)
-                _proposal = np.hstack(
-                    [_proposal, score]) if score is not None else _proposal
-                _proposal = to_tensor(_proposal)
-            else:
-                _proposal = None
-            return _img, _img_meta, _proposal
-
-        img, img_meta, proposal, = prepare_single(
-                img, self.img_scales[0], False, proposal)
-        data = dict(image=img, is_first=img_meta['is_first'], 
-                id=vid_info['id'], img_shape=img_meta['img_shape'])
+        file_name = vid_info['file_name']
+        is_first = (vid_info['id'] == vid_info['start_id'])
+        data = dict(file_name=file_name, is_first=is_first, 
+                id=vid_info['id'])
         #data['is_first'] = True
         return data

@@ -17,16 +17,11 @@ import pickle
 from collections import OrderedDict
 
 import detectron2.data.transforms as T
-from detectron2.data.detection_utils import (
-        annotations_to_instances, 
-        filter_empty_instances, 
-        BoxMode, 
-)
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 import detectron2.utils.comm as comm
 from detectron2.modeling import build_model
-from detectron2.data import DatasetMapper, MetadataCatalog, build_batch_data_loader, MapDataset
+from detectron2.data import build_batch_data_loader, MapDataset
 from detectron2.data.samplers import InferenceSampler, RepeatFactorTrainingSampler, TrainingSampler
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 from detectron2.evaluation import verify_results, DatasetEvaluator, DatasetEvaluators
@@ -38,21 +33,11 @@ from point_rend import (
     YTVOSEvaluator, 
     COCODataset,
     inference_on_dataset_timestep,
+    DatasetMapper, 
 )
 
 
-def train_mapper(datas):
-    label_map = {1:0, 4:14, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 38:14, 40:38}
-    for ann in datas["annotations"]:
-        ann.update({'bbox_mode':BoxMode.XYXY_ABS})
-        ann['category_id'] = label_map.get(ann['category_id'], 80)
-    instances = annotations_to_instances(
-            datas["annotations"], datas["img_shape"], mask_format='bitmask')
-    datas.pop('annotations')
-    datas["instances"] = filter_empty_instances(instances)
-    return datas
-
-def build_detection_train_loader(dataset, cfg, mapper=train_mapper):
+def build_detection_train_loader(dataset, cfg, mapper=None):
     """
     A data loader:
     Args:
@@ -60,9 +45,13 @@ def build_detection_train_loader(dataset, cfg, mapper=train_mapper):
     Returns:
         an infinite iterator of training data
     """
+    if mapper is None:
+        mapper = DatasetMapper(cfg, True, True)
     dataset = MapDataset(dataset, mapper)
+
     sampler_name = cfg.DATALOADER.SAMPLER_TRAIN
-    
+    logger = logging.getLogger(__name__)
+    logger.info("Using training sampler {}".format(sampler_name))
     # TODO avoid if-else?
     if sampler_name == "TrainingSampler":
         sampler = TrainingSampler(len(dataset))
@@ -76,7 +65,8 @@ def build_detection_train_loader(dataset, cfg, mapper=train_mapper):
         num_workers=cfg.DATALOADER.NUM_WORKERS,
     )
 
-def build_detection_test_loader(dataset, cfg):
+
+def build_detection_test_loader(dataset, cfg, mapper=None):
     """
     A data loader:
     Args:
@@ -84,6 +74,9 @@ def build_detection_test_loader(dataset, cfg):
     Returns:
         an infinite iterator of training data
     """
+    if mapper is None:
+        mapper = DatasetMapper(cfg, False, False)
+    dataset = MapDataset(dataset, mapper)
     sampler = InferenceSampler(len(dataset))
 
     batch_sampler = torch.utils.data.sampler.BatchSampler(sampler, 1, drop_last=False)
@@ -157,22 +150,11 @@ class Trainer(DefaultTrainer):
 
     @classmethod
     def build_train_loader(cls, cfg):
-        dataset_type = 'YTVOSDataset'
         data_root = '/data/youtube-VIS/'
-        img_norm_cfg = dict(
-                mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
-
         train=dict(
             ann_file=data_root + 'annotation/train_e.json',
             img_prefix=data_root + 'train/JPEGImages',
-            img_scale=(1280, 720),
-            img_norm_cfg=img_norm_cfg,
-            size_divisor=32,
-            flip_ratio=0.5,
-            with_mask=True,
-            with_crowd=True,
-            with_label=True,
-            with_track=True)
+            )
         dataset = YTVOSDataset(**train)
         return build_detection_train_loader(dataset, cfg)
 
@@ -199,79 +181,16 @@ class Trainer(DefaultTrainer):
     
     @classmethod
     def build_test_loader(cls, cfg, dateset_name):
-        dataset_type = 'YTVOSDataset'
         data_root = '/data/youtube-VIS/'
-        img_norm_cfg = dict(
-                mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
 
         val=dict(
                 ann_file=data_root + 'annotation/valid_e.json',
                 img_prefix=data_root + 'train/JPEGImages',
-                img_scale=(1280, 720),
-                img_norm_cfg=img_norm_cfg,
-                size_divisor=32,
-                flip_ratio=0,
-                with_mask=True,
-                with_crowd=True,
-                with_label=True,
-                test_mode=True
+                test_mode=True, 
                 )
         dataset = COCODataset(**val)
         return build_detection_test_loader(dataset, cfg)
 
-    '''
-    @classmethod
-    def test(cls, cfg, model, evaluators=None):
-        """
-        Args:
-            cfg (CfgNode):
-            model (nn.Module):
-            evaluators (list[DatasetEvaluator] or None): if None, will call
-                :meth:`build_evaluator`. Otherwise, must have the same length as
-                `cfg.DATASETS.TEST`.
-
-        Returns:
-            dict: a dict of result metrics
-        """
-        logger = logging.getLogger(__name__)
-        if isinstance(evaluators, DatasetEvaluator):
-            evaluators = [evaluators]
-        if evaluators is not None:
-            assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
-                len(cfg.DATASETS.TEST), len(evaluators)
-            )
-
-        results = OrderedDict()
-        for idx, dataset_name in enumerate(cfg.DATASETS.TEST):
-            data_loader = cls.build_test_loader(cfg, dataset_name)
-            # When evaluators are passed in as arguments,
-            # implicitly assume that evaluators can be created before data_loader.
-            if evaluators is not None:
-                evaluator = evaluators[idx]
-            else:
-                try:
-                    evaluator = cls.build_evaluator(cfg, dataset_name)
-                except NotImplementedError:
-                    logger.warn(
-                        "No evaluator found. Use `DefaultTrainer.test(evaluators=)`, "
-                        "or implement its `build_evaluator` method."
-                    )
-                    results[dataset_name] = {}
-                    continue
-            results_i = inference_on_dataset_timestep(model, data_loader, evaluator)
-            results[dataset_name] = results_i
-            if comm.is_main_process():
-                assert isinstance(
-                    results_i, dict
-                ), "Evaluator must return a dict on the main process. Got {} instead.".format(
-                    results_i
-                )
-                logger.info("Evaluation results for {} in csv format:".format(dataset_name))
-
-        if len(results) == 1:
-            results = list(results.values())[0]
-        return results
-    '''
 
 def setup(args):
     """
