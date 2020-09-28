@@ -131,18 +131,9 @@ if __name__ == "__main__":
         pred_by_image[(p['instances'][0]['image_id'])].extend(p['instances'])
 
     #dicts = list(DatasetCatalog.get(args.dataset))
-    img_norm_cfg = dict(
-            mean=[102.9801, 115.9465, 122.7717], std=[1.0, 1.0, 1.0], to_rgb=False)
     val = dict(
                 ann_file=args.ann_file,
                 img_prefix=args.img_prefix,
-                img_scale=(1280, 720),
-                img_norm_cfg=img_norm_cfg,
-                size_divisor=32,
-                flip_ratio=0,
-                with_mask=True,
-                with_crowd=True,
-                with_label=True,
                 ) 
     dicts = list(COCODataset(**val))
     metadata = MetadataCatalog.get(args.dataset)
@@ -168,7 +159,7 @@ if __name__ == "__main__":
     for dic in tqdm.tqdm(dicts):
         image_id = dic['image_id'] - 1
         vid_info = vid_infos[image_id]
-        assert vid_info['file_name'] == dic['img_file'], vid_info['file_name']
+        #assert vid_info['file_name'] == dic['file_name'], (vid_info['file_name'], dic['file_name'])
         img = cv2.imread(os.path.join(args.img_prefix, vid_info['file_name']))[:, :, ::-1]
         #img = cv2.resize(img, (1280, 720))
         dirname = os.path.dirname(vid_info['file_name'])

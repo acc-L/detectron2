@@ -9,6 +9,7 @@ from .transforms import (ImageTransform, BboxTransform, MaskTransform,
 from pycocotools2.coco import COCO
 #from mmcv.parallel import DataContainer as DC
 from .utils import to_tensor, random_scale
+from detectron2.structures import Boxes,BoxMode
 
 class COCODataset(CustomDataset):
     CLASSES=('person','giant_panda','lizard','parrot','skateboard','sedan',
@@ -82,8 +83,7 @@ class COCODataset(CustomDataset):
         # prepare a pair of image in a sequence
         vid_info = self.vid_infos[idx]
         # load image
-        img = cv2.imread(osp.join(self.img_prefix, vid_info['file_name']))
-        img_shape = img.shape[:2]
+        file_name = osp.join(self.img_prefix, vid_info['file_name'])
         #img = cv2.resize(img, self.img_scales[0])
         # load proposals if necessary
         if self.proposals is not None:
@@ -104,15 +104,9 @@ class COCODataset(CustomDataset):
                 scores = None
 
         anns = self.get_ann_info(idx)
-        #print(idx)
-        #print(vid_info)
-        #print(anns)
-        gt_labels = np.array([ann['category_id'] for ann in anns])
-        gt_bboxes = np.array([ann['bbox'] for ann in anns])
-        gt_bboxes[:,2] += (gt_bboxes[:,0] - 1)
-        gt_bboxes[:,3] += (gt_bboxes[:,1] - 1)
+        [ann.update({'bbox_mode': BoxMode.XYWH_ABS}) for ann in anns]
         #gt_masks = [cv2.resize(self.ytvos.annToMask(ann), self.img_scales[0]) for ann in anns]
-        gt_masks = [self.ytvos.annToMask(ann) for ann in anns]
+        #gt_masks = [self.ytvos.annToMask(ann) for ann in anns]
 
         #gt_bboxes = self.bbox_transform(gt_bboxes, img_shape, scale_factor,
         #                               False)
@@ -122,40 +116,34 @@ class COCODataset(CustomDataset):
         # compute matching of reference frame with current frame
         # 0 denote there is no matching
         # skip the image if there is no valid gt bbox
-        if len(gt_bboxes) == 0:
+        if len(anns) == 0:
             return None
 
         ori_shape = (vid_info['height'], vid_info['width'], 3)
 
         data = dict(
-            image=to_tensor(img),
-            #img_meta=img_meta,
-            height=img_shape[0],
-            width=img_shape[1], 
-            img_shape=img_shape, 
-            image_id = vid_info['id'], 
+            file_name=file_name,
+            image_id=vid_info['id']
         )
         ann = []
+        '''
         for i, bbox in enumerate(gt_bboxes):
             instance = {'bbox':bbox, 'bbox_mode':0}
             if self.proposals is not None:
                 instance['proposals'] = to_tensor(proposals)
-            if self.with_label:
-                instance['category_id']=gt_labels[i]
-            if self.with_mask:
-                instance['segmentation']=gt_masks[i]
+            instance['category_id']=gt_labels[i]
+            instance['segmentation']=gt_masks[i]
             ann.append(instance)
-
-        data['annotations'] = ann
-        data['img_file'] = vid_info['file_name']
+        '''
+        data['annotations'] = anns
         return data
 
     def prepare_test_img(self, idx):
         """Prepare an image for testing (multi-scale and flipping)"""
         vid_info = self.vid_infos[idx]
-        file_name = vid_info['file_name']
+        file_name = osp.join(self.img_prefix, vid_info['file_name'])
         is_first = (vid_info['id'] == vid_info['start_id'])
         data = dict(file_name=file_name, is_first=is_first, 
-                id=vid_info['id'])
+                image_id=vid_info['id'], id=vid_info['id'])
         #data['is_first'] = True
         return data

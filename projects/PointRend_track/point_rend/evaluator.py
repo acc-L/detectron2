@@ -64,19 +64,19 @@ def instances_to_ytvis_json(instances, img_id):
         keypoints = instances.pred_keypoints
 
     results = []
-    #label_map = {1:0, 4:14, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 38:14, 40:38}
-    #label_rev = {}
-    #for k, v in label_map.items():
-    #    label_rev[v] = k
+    label_map = {1:0, 4:14, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 38:14, 40:38}
+    label_rev = {}
+    for k, v in label_map.items():
+        label_rev[v] = k
     for k in range(num_instance):
         result = {
             "image_id": img_id,
-            "category_id": classes[k], 
+            "category_id": label_rev.get(classes[k], 0), 
             "bbox": boxes[k],
             "score": scores[k],
         }
         if has_mask:
-            result["segmentations"] = rles[k]
+            result["segmentation"] = rles[k]
         if has_keypoints:
             # In COCO annotations,
             # keypoints coordinates are pixel indices.
@@ -91,7 +91,8 @@ def instances_to_ytvis_json(instances, img_id):
 def convert_for_eval(prediction):
     res=[]
     label_rev={}
-    label_map = {1:0, 4:14, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 38:14, 40:38}
+    #label_map = {1:0, 4:14, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 38:14, 40:38}
+    label_map = {1:0, 5:36, 6:2, 8:16, 14:15, 15:19, 17:6, 18:17, 20:21, 21:3, 22:23, 27:37, 28:4, 29:7, 30:22, 32:20, 33:31, 34:8, 40:38}
     for k, v in label_map.items():
         label_rev[v] = k
     for ins in prediction['instances']:
@@ -124,8 +125,10 @@ def _evaluate_predictions_on_coco(coco_gt, coco_results, iou_type, kpt_oks_sigma
 
     coco_dt = coco_gt.loadRes(coco_results)
     coco_eval = COCOeval(coco_gt, coco_dt, iou_type)
-    coco_eval.params.catIds = [1, 4, 5, 6, 8, 14, 15, 17, 18, 20, 21, 22, 
-            27, 28, 29, 30, 32, 33, 34, 38, 40]
+    class_ids = [1, 5, 6, 8, 14, 15, 17, 18, 20, 21, 22,
+            27, 28, 29, 30, 32, 33, 34, 40]
+    class_ids = [1, 8, 14]
+    coco_eval.params.catIds = class_ids
 
     if iou_type == "keypoints":
         # Use the COCO default keypoint OKS sigmas unless overrides are specified
@@ -257,14 +260,21 @@ class YTVOSEvaluator(COCOEvaluator):
                 f.flush()
 
         self._logger.info("Evaluating predictions ...")
-        #class_ids = [1, 4, 5, 6, 8, 14, 15, 17, 18, 20, 21, 22,
-        #                    27, 28, 29, 30, 32, 33, 34, 38, 40]
-        class_ids = [
-            0, 14, 36, 2, 16, 15, 19, 6, 17, 21, 
-            3, 23, 37, 4, 7, 22, 20, 31, 8, 38
-        ]
+        class_names = ('person','giant_panda','lizard','parrot','skateboard','sedan',
+                'ape','dog','snake','monkey','hand','rabbit','duck','cat','cow','fish',
+                'train','horse','turtle','bear','motorbike','giraffe','leopard',
+                'fox','deer','owl','surfboard','airplane','truck','zebra','tiger',
+                'elephant','snowboard','boat','shark','mouse','frog','eagle','earless_seal',
+                'tennis_racket')
+        class_ids = [1, 5, 6, 8, 14, 15, 17, 18, 20, 21, 22,
+                            27, 28, 29, 30, 32, 33, 34, 40]
+        class_ids = [1, 8, 14]
+        #class_ids = [
+        #    0, 14, 36, 2, 16, 15, 19, 6, 17, 21, 
+        #    3, 23, 37, 4, 7, 22, 20, 31, 8, 38
+        #]
         
-        class_names = [self._metadata.thing_dataset_id_to_contiguous_id[
+        class_names = [self._metadata.thing_classes[
             class_id] for class_id in class_ids]
         for task in sorted(tasks):
             coco_eval = (

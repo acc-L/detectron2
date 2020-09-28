@@ -191,8 +191,8 @@ class PointRendROIHeads(StandardROIHeads):
         if self.training:
             assert targets
             proposals = self.label_and_sample_proposals(proposals, targets)
-        #else:
-        #    proposals = _add_bbox_from_last_frame(proposals, self.ref_proposals)
+        else:
+            proposals = _add_bbox_from_last_frame(proposals, self.ref_proposals)
         del targets
 
         if self.training:
